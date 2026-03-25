@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+
+# Raw data (don't commit)
+data/raw/*.csv
+
+# Generated outputs
+outputs/*.png
+outputs/*.pdf
+outputs/*.svg
+
+# Jupyter
+*.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Logs
+*.log
