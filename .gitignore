@@ -1,36 +1,49 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Virtual environments
-.venv/
-venv/
-env/
+# Node / frontend
+node_modules
+dist
+dist-ssr
+*.local
+.vite/
+coverage/
 
-# Build artifacts
-dist/
-build/
-
-# Raw data (don't commit)
-data/raw/*.csv
-
-# Generated outputs
-outputs/*.png
-outputs/*.pdf
-outputs/*.svg
-
-# Jupyter
-*.ipynb_checkpoints/
-
-# OS
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 Thumbs.db
 
-# Tool caches
-.pytest_cache/
-.ruff_cache/
+# Python (in python/ subdirectory)
+python/__pycache__/
+python/**/__pycache__/
+python/**/*.py[cod]
+python/**/*.egg-info/
+python/.eggs/
+python/.venv/
+python/venv/
+python/build/
+python/.pytest_cache/
+python/.ruff_cache/
+python/**/*.ipynb_checkpoints/
 
-# Logs
-*.log
+# Raw data (don't commit)
+python/data/raw/*.csv
+
+# Generated outputs
+python/outputs/*.png
+python/outputs/*.pdf
+python/outputs/*.svg

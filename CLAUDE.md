@@ -1,112 +1,111 @@
-# ERCOT Nodal Price Clustering Project
+# ERCOT Nodal Price Clustering — Project Guidelines
 
-## Project Overview
+## Overview
 
-This project performs hierarchical clustering on ERCOT nodal electricity prices to discover whether nodes with similar price behavior form geographically coherent clusters — without using any location data in the clustering itself. The answer is yes: congestion and transmission constraints are strongly reflected in nodal price co-movement, producing clusters that align with physical grid regions (South, North, West, Houston, Waco).
+This repo contains both a **React/TypeScript/Vite browser app** (project root) and a **Python reference implementation** (`python/`).
 
-## Architecture
+The browser app clusters ERCOT nodal electricity prices hierarchically, revealing geographic coherence in price behavior without using location data.
+
+---
+
+## Frontend Architecture (React/TypeScript/Vite)
+
+### Stack
+- **React 19** + **TypeScript** (strict mode)
+- **Vite 8** — bundler and dev server
+- **Tailwind CSS v4** — utility-first styling (uses `@import "tailwindcss"` in CSS, no config file required, uses `@tailwindcss/vite` plugin)
+- **react-plotly.js** — interactive scatter maps
+- **papaparse** — CSV parsing in the browser
+- **ml-hclust** — hierarchical clustering (`agnes` function)
+- **Vitest** — unit testing
+
+### Commands
+```bash
+npm run dev      # start dev server at http://localhost:5173
+npm run build    # production build (tsc + vite build)
+npm run test     # run unit tests with Vitest
+npm run lint     # ESLint
+```
+
+### Project Layout
 
 ```
 ercot-clustering/
-├── CLAUDE.md                    # This file — project guidelines
-├── README.md                    # User-facing documentation
-├── pyproject.toml               # Python project config (dependencies, scripts)
 ├── src/
-│   └── ercot_clustering/
-│       ├── __init__.py
-│       ├── config.py            # All configurable parameters (dates, thresholds, k)
-│       ├── app.py               # Streamlit GUI (ercot-cluster-ui entry point)
-│       ├── data/
-│       │   ├── loader.py        # Load 15-min price CSVs + node lat/lon metadata
-│       │   └── cleaner.py       # Missing data filtering (>5% threshold)
-│       ├── clustering/
-│       │   ├── correlation.py   # Pearson correlation matrix → distance matrix (1 − ρ)
-│       │   ├── hierarchical.py  # scipy linkage, dendrogram, fcluster (both modes)
-│       │   └── subcluster.py    # Re-cluster the largest cluster into k subclusters
-│       └── visualization/
-│           ├── scatter_map.py   # Scatter plot of nodes colored by cluster on lat/lon axes
-│           └── dendrogram.py    # Optional: dendrogram tree visualization
-├── data/
-│   ├── raw/                     # Raw 15-min price CSVs (not committed)
-│   └── metadata/                # Node lat/lon mapping CSV
-├── outputs/                     # Generated plots and reports
-├── notebooks/                   # Optional Jupyter exploration
-└── tests/
-    ├── test_correlation.py
-    ├── test_clustering.py
-    └── test_cleaner.py
+│   ├── core/
+│   │   ├── types.ts          # Shared TypeScript types and DEFAULT_CONFIG
+│   │   ├── csvParser.ts      # Parse wide-format price CSVs and metadata CSVs
+│   │   ├── correlation.ts    # Pearson correlation, distance matrix, downsampling
+│   │   └── clustering.ts     # Hierarchical clustering using ml-hclust (agnes)
+│   ├── workers/
+│   │   └── clustering.worker.ts   # Web Worker: full pipeline (downsample → dist → cluster)
+│   ├── hooks/
+│   │   └── useClustering.ts  # React hook managing Worker lifecycle
+│   ├── components/
+│   │   ├── inputs/
+│   │   │   ├── FileUpload.tsx    # Drag-and-drop file input
+│   │   │   └── ConfigPanel.tsx   # Clustering configuration UI
+│   │   └── outputs/
+│   │       ├── ClusterMap.tsx    # Plotly scatter map colored by cluster
+│   │       ├── ClusterStats.tsx  # Summary table (cluster ID, node count, %)
+│   │       └── ProgressBar.tsx   # Animated progress during clustering
+│   ├── App.tsx               # Root component — layout and state management
+│   ├── main.tsx              # React entry point
+│   └── index.css             # Tailwind import + custom component classes
+├── tests/
+│   ├── setup.ts
+│   └── unit/
+│       ├── correlation.test.ts
+│       └── clustering.test.ts
+├── python/                   # Python reference implementation (see python/CLAUDE.md)
+└── ...config files...
 ```
 
-## Key Technical Decisions
+### Web Worker Pipeline
 
-### Language & Libraries
-- **Python 3.11+**
-- `pandas` — time series data handling
-- `numpy` — numerical operations
-- `scipy.cluster.hierarchy` — linkage, fcluster, dendrogram
-- `scipy.spatial.distance` — squareform, pdist (correlation distance)
-- `matplotlib` — scatter plots with cluster coloring
-- `streamlit` — interactive web GUI (optional install: `pip install -e ".[ui]"`)
-- `plotly` — interactive scatter maps in the Streamlit GUI
-- `pytest` — testing
+The clustering computation runs entirely in a Web Worker (`src/workers/clustering.worker.ts`) to avoid blocking the UI:
 
-### Clustering Algorithm
-- **Hierarchical agglomerative clustering** with **Ward's method** (or average linkage — see config)
-- **Distance metric**: `1 − ρ` where `ρ` = Pearson correlation between each pair of nodes' price time series
-- Two cutting strategies, selectable per run:
-  1. **`maxclust`** — fixed cluster count `k` (better for low-volatility periods like 2024–2025)
-  2. **`distance`** — threshold-based natural cluster formation (better for high-volatility periods like 2022–2023)
+1. **Downsample** — if `resolution='daily'`, average 15-min prices to daily values
+2. **Drop sparse nodes** — remove nodes exceeding `missingDataThreshold` fraction of NaN
+3. **Distance matrix** — compute n×n pairwise `1 - pearson_corr` matrix with inline progress updates
+4. **Hierarchical clustering** — `agnes` from `ml-hclust` with Ward linkage; cut by fixed k or distance threshold
+5. **Subclustering** — re-cluster the largest cluster into k subclusters
+6. Post `RESULT` message back to main thread
 
-### Two-Pass Clustering
-1. **First pass**: Cluster all nodes → produces broad groups
-2. **Second pass (subclustering)**: Take the largest cluster from pass 1 and re-cluster it with `maxclust` k=8 to reveal finer regional structure
+### ml-hclust API Notes
 
-## Configuration Parameters
+- `agnes(data, {method, distanceFunction})` — data is an array of items (we pass integer indices)
+- `tree.group(k)` returns the root tree node itself (NOT an array); its `.children` property contains k cluster subtrees
+- Each subtree node has `{isLeaf, index, children}` — walk recursively to collect leaf indices
+- `tree.cut(distance)` returns an array of cluster subtree nodes (same structure as individual children)
 
-All tunable parameters live in `src/ercot_clustering/config.py`:
+### TypeScript Conventions
 
-```python
-@dataclass
-class ClusteringConfig:
-    # Date ranges
-    start_date: str = "2020-01-01"
-    end_date: str | None = None  # None = latest available
+- Strict mode (`noUnusedLocals`, `noUnusedParameters`, `strict`)
+- No `any` types
+- `Float64Array` used for time-series node values (memory-efficient)
+- Path alias `@/*` maps to `src/*`
+- Worker created via `new Worker(new URL('../workers/clustering.worker.ts', import.meta.url), {type: 'module'})`
 
-    # Data quality
-    missing_data_threshold: float = 0.05  # Remove nodes with >5% missing
+### Tailwind v4 Notes
 
-    # First-pass clustering
-    method: str = "ward"                  # Linkage method
-    criterion: str = "distance"           # "distance" or "maxclust"
-    distance_threshold: float = 0.025     # Used when criterion="distance"
-    max_clusters: int = 8                 # Used when criterion="maxclust"
+Tailwind v4 does not have a CLI or `tailwind.config.js`. Instead:
+- Import in CSS: `@import "tailwindcss";`
+- Add plugin in `vite.config.ts`: `import tailwindcss from '@tailwindcss/vite'`
+- Custom component classes go in `@layer components { }` in `src/index.css`
 
-    # Subclustering (second pass on largest cluster)
-    subcluster_k: int = 8
-    subcluster_criterion: str = "maxclust"
-```
+---
 
-## GUI
+## Python Reference Implementation
 
-Run the Streamlit GUI with:
+See `python/CLAUDE.md` for the Python architecture. The Python code uses:
+- `scipy.cluster.hierarchy` for clustering
+- `streamlit` for the GUI
+- `pandas` + `numpy` for data handling
+
+Run the Python GUI:
 ```bash
+cd python
+pip install -e ".[ui]"
 ercot-cluster-ui
-# or
-streamlit run src/ercot_clustering/app.py
 ```
-
-The GUI provides:
-- Drag-and-drop CSV upload for price data and node metadata
-- Preset configuration (Full History / Recent / Custom)
-- Interactive Plotly scatter maps showing geographic clustering
-- Cluster statistics table
-- CSV download of cluster assignments
-
-## Coding Standards
-- Type hints on all function signatures
-- Docstrings on all public functions (Google style)
-- No global state — pass config objects explicitly
-- Functions should be pure where possible (input → output, no side effects)
-- Use `pathlib.Path` for all file paths
-- Format with `ruff` (line length 100)
-- Lint with `ruff check`
